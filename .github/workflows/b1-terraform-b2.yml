@@ -1,6 +1,9 @@
 name: B1 Terraform B2 provider (manual)
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["terraform_b2/**", ".github/workflows/b1-terraform-b2.yml"]
 permissions:
   contents: read
 concurrency:
@@ -43,19 +46,19 @@ jobs:
           API=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["apiInfo"]["storageApi"]["apiUrl"])')
           TOKEN=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
           ACCT=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["accountId"])')
-          echo "lifecycle rules stored by Terraform:"
-          curl -s -H "Authorization: $TOKEN" -d "{\"accountId\":\"$ACCT\",\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_buckets" | python3 -c 'import sys,json; b=json.load(sys.stdin)["buckets"][0]; print([(r["fileNamePrefix"], r["daysFromUploadingToHiding"], r["daysFromHidingToDeleting"]) for r in b["lifecycleRules"]], "| type:", b["bucketType"])'
+          RULES=$(curl -s -H "Authorization: $TOKEN" -d "{\"accountId\":\"$ACCT\",\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_buckets" | python3 -c 'import sys,json; b=json.load(sys.stdin)["buckets"][0]; print([(r["fileNamePrefix"], r["daysFromUploadingToHiding"], r["daysFromHidingToDeleting"]) for r in b["lifecycleRules"]], "| type:", b["bucketType"])')
+          echo "::notice title=B2-verify::lifecycle rules stored by Terraform: $RULES"
           UAUTH=$(curl -s -u "$KEY_ID:$KEY_SECRET" https://api.backblazeb2.com/b2api/v3/b2_authorize_account)
           UTOKEN=$(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
-          echo "upload-only key capabilities: $(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["apiInfo"]["storageApi"]["capabilities"])')"
+          echo "::notice title=B2-verify::upload-only key capabilities: $(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["apiInfo"]["storageApi"]["capabilities"])')"
           LIST=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_file_names")
-          echo "list with the upload-only key (expect 401): $LIST"
+          echo "::notice title=B2-verify::list with the upload-only key (expect 401): $LIST"
           UP=$(curl -s -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_get_upload_url")
           URL=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["uploadUrl"])')
           UTK=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
           SHA=$(printf 'tf probe' | sha1sum | cut -d" " -f1)
           CODE=$(printf 'tf probe' | curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTK" -H "X-Bz-File-Name: raw/probe.txt" -H "Content-Type: text/plain" -H "X-Bz-Content-Sha1: $SHA" --data-binary @- "$URL")
-          echo "upload with the upload-only key (expect 200): $CODE"
+          echo "::notice title=B2-verify::upload with the upload-only key (expect 200): $CODE"
       - name: Destroy (cleanup)
         if: always()
         run: terraform destroy -input=false -auto-approve
