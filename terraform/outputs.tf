@@ -5,3 +5,4 @@ output "demo_schema" {
 output "protected_branch" {
   value = github_branch_protection.tf_demo.pattern
 }
+# rerun after token permission update
