@@ -1,0 +1,22 @@
+# Throwaway bundle used to test deploying a Databricks job from GitHub Actions (test C1).
+bundle:
+  name: sandbox_probe
+
+targets:
+  dev:
+    default: true
+    mode: development
+  prod:
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/prod
+
+resources:
+  jobs:
+    probe_job:
+      name: sandbox-probe-${bundle.target}
+      tasks:
+        - task_key: probe
+          notebook_task:
+            notebook_path: ./notebooks/probe.py
+            base_parameters:
+              target: ${bundle.target}

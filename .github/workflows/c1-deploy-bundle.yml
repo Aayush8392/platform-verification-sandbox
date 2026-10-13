@@ -1,0 +1,29 @@
+name: C1 deploy Databricks bundle (dev then prod)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["databricks.yml", "notebooks/**", ".github/workflows/c1-deploy-bundle.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: c1-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Check secrets exist (values are never printed)
+        run: |
+          test -n "$DATABRICKS_HOST" && echo "DATABRICKS_HOST is set" || (echo "DATABRICKS_HOST missing" && exit 1)
+          test -n "$DATABRICKS_TOKEN" && echo "DATABRICKS_TOKEN is set" || (echo "DATABRICKS_TOKEN missing" && exit 1)
+      - run: databricks bundle validate -t dev
+      - run: databricks bundle deploy -t dev
+      - run: databricks bundle run probe_job -t dev
+      - run: databricks bundle deploy -t prod
+      - run: databricks bundle run probe_job -t prod
