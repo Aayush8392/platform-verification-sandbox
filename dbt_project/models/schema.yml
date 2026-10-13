@@ -1,0 +1,11 @@
+version: 2
+models:
+  - name: market_counts
+    columns:
+      - name: market
+        data_tests:
+          - not_null
+          - unique
+      - name: products
+        data_tests:
+          - not_null

@@ -1,0 +1,9 @@
+name: sandbox_dbt
+version: "1.0"
+config-version: 2
+profile: databricks
+model-paths: ["models"]
+
+models:
+  sandbox_dbt:
+    +materialized: view
