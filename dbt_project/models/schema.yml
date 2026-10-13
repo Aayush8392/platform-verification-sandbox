@@ -1,8 +1,8 @@
 version: 2
 models:
-  - name: market_counts
+  - name: grade_counts
     columns:
-      - name: market
+      - name: grade
         data_tests:
           - not_null
           - unique
