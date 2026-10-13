@@ -48,6 +48,9 @@ jobs:
           ACCT=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["accountId"])')
           RULES=$(curl -s -H "Authorization: $TOKEN" -d "{\"accountId\":\"$ACCT\",\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_buckets" | python3 -c 'import sys,json; b=json.load(sys.stdin)["buckets"][0]; print([(r["fileNamePrefix"], r["daysFromUploadingToHiding"], r["daysFromHidingToDeleting"]) for r in b["lifecycleRules"]], "| type:", b["bucketType"])')
           echo "::notice title=B2-verify::lifecycle rules stored by Terraform: $RULES"
+          KEYS=$(curl -s -H "Authorization: $TOKEN" -d "{\"accountId\":\"$ACCT\"}" "$API/b2api/v3/b2_list_keys")
+          echo "::notice title=B2-verify::key created by Terraform (from the admin key list): $(echo "$KEYS" | python3 -c 'import sys,json; d=json.load(sys.stdin); print([(k["keyName"], k["capabilities"], k.get("bucketIds") or k.get("bucketId")) for k in d.get("keys", []) if k["keyName"]=="tfprobe-upload-only"] or d.get("code"))' 2>&1 | head -c 400)"
+          echo "::notice title=B2-verify::key id length ${#KEY_ID}, secret length ${#KEY_SECRET} (B2 key ids are 25 chars, secrets 31)"
           set +e
           UAUTH=$(curl -s -u "$KEY_ID:$KEY_SECRET" https://api.backblazeb2.com/b2api/v3/b2_authorize_account)
           echo "::notice title=B2-verify::authorize with the Terraform-created key: $(echo "$UAUTH" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("code") or ("ok, capabilities=" + str(d["apiInfo"]["storageApi"]["capabilities"]) + ", bucket restriction=" + str(d["apiInfo"]["storageApi"].get("bucketId"))))' 2>&1 | head -c 300)"
