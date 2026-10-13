@@ -31,28 +31,25 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GH_TF_TOKEN }}
       TF_VAR_analyst_email: ${{ secrets.TF_ANALYST_EMAIL }}
       TF_IN_AUTOMATION: "true"
+      TF_STATE_BUCKET: tfstate-aayush # not a secret: useless without the key
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v4.0.1
         with:
           terraform_version: 1.16.5
-      - name: Check state settings (lengths only, values are never printed)
+      - name: Check state key settings (lengths only, values are never printed)
         env:
-          RAW_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           RAW_KEY_ID: ${{ secrets.TF_STATE_KEY_ID }}
+          RAW_APP_KEY: ${{ secrets.TF_STATE_APP_KEY }}
         run: |
-          for v in RAW_BUCKET RAW_KEY_ID; do
+          for v in RAW_KEY_ID RAW_APP_KEY; do
             val="${!v}"
             trimmed="$(printf '%s' "$val" | tr -d '[:space:]')"
-            echo "$v: length=${#val}, length after removing whitespace=${#trimmed}, has whitespace: $([ "${#val}" != "${#trimmed}" ] && echo YES || echo no)"
+            echo "$v: length=${#val}, after removing whitespace=${#trimmed}, has whitespace: $([ "${#val}" != "${#trimmed}" ] && echo YES || echo no)"
           done
-          printf '%s' "$RAW_BUCKET" | grep -qE '^[a-z0-9-]{6,63}$' || echo "WARNING: bucket name has characters B2 does not allow (uppercase, spaces or symbols)"
       - name: Init (state in private B2 bucket)
-        env:
-          RAW_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
-          BUCKET="$(printf '%s' "$RAW_BUCKET" | tr -d '[:space:]')"
-          terraform init -input=false             -backend-config="bucket=${BUCKET}"             -backend-config="endpoints={s3=\"https://s3.eu-central-003.backblazeb2.com\"}"
+          terraform init -input=false             -backend-config="bucket=${TF_STATE_BUCKET}"             -backend-config='endpoints={s3="https://s3.eu-central-003.backblazeb2.com"}'
       - run: terraform fmt -check -recursive
       - run: terraform validate
       - name: Plan
