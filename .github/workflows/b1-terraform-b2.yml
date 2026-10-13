@@ -54,16 +54,32 @@ jobs:
           set +e
           echo "tf probe" > probe.txt
           S3="--endpoint-url https://s3.eu-central-003.backblazeb2.com --region eu-central-003"
-          PUT=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api put-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt --body probe.txt 2>&1 | head -c 200)
+          PUT=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api put-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt --body probe.txt 2>&1 | tr '
+' ' ' | head -c 220)
           echo "::notice title=B2-verify::S3 put-object with the Terraform-created upload-only key: ${PUT:-ok (no error)}"
-          LST=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api list-objects-v2 $S3 --bucket off-tfprobe-aayush-8392 2>&1 | head -c 200)
+          LST=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api list-objects-v2 $S3 --bucket off-tfprobe-aayush-8392 2>&1 | tr '
+' ' ' | head -c 220)
           echo "::notice title=B2-verify::S3 list-objects with the same key (expect denied): $LST"
-          GET=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api get-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt out.txt 2>&1 | head -c 200)
+          GET=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api get-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt out.txt 2>&1 | tr '
+' ' ' | head -c 220)
           echo "::notice title=B2-verify::S3 get-object with the same key (expect denied): $GET"
-          DEL=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api delete-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt 2>&1 | head -c 200)
+          DEL=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api delete-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt 2>&1 | tr '
+' ' ' | head -c 220)
           echo "::notice title=B2-verify::S3 delete-object with the same key (expect denied): ${DEL:-ALLOWED}"
-          # remove the probe object with the admin key so the bucket can be destroyed
-          AWS_ACCESS_KEY_ID="$B2_APPLICATION_KEY_ID" AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" aws s3 rm $S3 s3://off-tfprobe-aayush-8392 --recursive >/dev/null 2>&1
+      - name: Empty the bucket (all versions) with the admin key so it can be destroyed
+        if: always()
+        run: |
+          pip install -q boto3
+          python3 - <<'INNER'
+          import os, boto3
+          s3 = boto3.client("s3", endpoint_url="https://s3.eu-central-003.backblazeb2.com", region_name="eu-central-003",
+                            aws_access_key_id=os.environ["B2_APPLICATION_KEY_ID"], aws_secret_access_key=os.environ["B2_APPLICATION_KEY"])
+          n = 0
+          for page in s3.get_paginator("list_object_versions").paginate(Bucket="off-tfprobe-aayush-8392"):
+              for v in (page.get("Versions") or []) + (page.get("DeleteMarkers") or []):
+                  s3.delete_object(Bucket="off-tfprobe-aayush-8392", Key=v["Key"], VersionId=v["VersionId"]); n += 1
+          print("deleted versions:", n)
+          INNER
       - name: Destroy (cleanup)
         if: always()
         run: terraform destroy -input=false -auto-approve
