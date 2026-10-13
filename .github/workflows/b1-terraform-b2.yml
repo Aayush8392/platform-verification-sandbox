@@ -1,0 +1,61 @@
+name: B1 Terraform B2 provider (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: terraform-b2
+  cancel-in-progress: false
+jobs:
+  b2:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform_b2
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_APP_KEY }}
+      B2_APPLICATION_KEY_ID: ${{ secrets.B2_TF_KEY_ID }}
+      B2_APPLICATION_KEY: ${{ secrets.B2_TF_APP_KEY }}
+      TF_IN_AUTOMATION: "true"
+      TF_STATE_BUCKET: tfstate-aayush
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.16.5
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}" -backend-config='endpoints={s3="https://s3.eu-central-003.backblazeb2.com"}'
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan -lock=false
+      - name: Apply
+        run: terraform apply -input=false -auto-approve tfplan
+      - name: Verify what Terraform created (bucket, lifecycle rules, upload-only key)
+        run: |
+          set -e
+          KEY_ID=$(terraform output -raw upload_key_id)
+          KEY_SECRET=$(terraform output -raw upload_key_secret)
+          echo "::add-mask::$KEY_SECRET"
+          BUCKET_ID=$(terraform output -raw bucket_id)
+          AUTH=$(curl -s -u "$B2_APPLICATION_KEY_ID:$B2_APPLICATION_KEY" https://api.backblazeb2.com/b2api/v3/b2_authorize_account)
+          API=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["apiInfo"]["storageApi"]["apiUrl"])')
+          TOKEN=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
+          ACCT=$(echo "$AUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["accountId"])')
+          echo "lifecycle rules stored by Terraform:"
+          curl -s -H "Authorization: $TOKEN" -d "{\"accountId\":\"$ACCT\",\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_buckets" | python3 -c 'import sys,json; b=json.load(sys.stdin)["buckets"][0]; print([(r["fileNamePrefix"], r["daysFromUploadingToHiding"], r["daysFromHidingToDeleting"]) for r in b["lifecycleRules"]], "| type:", b["bucketType"])'
+          UAUTH=$(curl -s -u "$KEY_ID:$KEY_SECRET" https://api.backblazeb2.com/b2api/v3/b2_authorize_account)
+          UTOKEN=$(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
+          echo "upload-only key capabilities: $(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin)["apiInfo"]["storageApi"]["capabilities"])')"
+          LIST=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_list_file_names")
+          echo "list with the upload-only key (expect 401): $LIST"
+          UP=$(curl -s -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$API/b2api/v3/b2_get_upload_url")
+          URL=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["uploadUrl"])')
+          UTK=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin)["authorizationToken"])')
+          SHA=$(printf 'tf probe' | sha1sum | cut -d" " -f1)
+          CODE=$(printf 'tf probe' | curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTK" -H "X-Bz-File-Name: raw/probe.txt" -H "Content-Type: text/plain" -H "X-Bz-Content-Sha1: $SHA" --data-binary @- "$URL")
+          echo "upload with the upload-only key (expect 200): $CODE"
+      - name: Destroy (cleanup)
+        if: always()
+        run: terraform destroy -input=false -auto-approve
