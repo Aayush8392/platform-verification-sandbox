@@ -20,3 +20,4 @@ resources:
             notebook_path: ./notebooks/probe.py
             base_parameters:
               target: ${bundle.target}
+# triggered after secrets were added
