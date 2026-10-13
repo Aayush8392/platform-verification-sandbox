@@ -1,0 +1,53 @@
+name: C3 Terraform plan on pull request, apply on merge
+on:
+  pull_request:
+    paths: ["terraform/**", ".github/workflows/c3-terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/c3-terraform.yml"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "plan | apply | destroy"
+        default: plan
+permissions:
+  contents: read
+concurrency:
+  group: terraform
+  cancel-in-progress: false
+jobs:
+  terraform:
+    # secrets are never exposed to forks; same-repo pull requests only
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_APP_KEY }}
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GH_TF_TOKEN }}
+      TF_VAR_analyst_email: ${{ secrets.TF_ANALYST_EMAIL }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_version: 1.16.5
+      - name: Init (state in private B2 bucket)
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="endpoints={s3=\"https://s3.eu-central-003.backblazeb2.com\"}"
+      - run: terraform fmt -check -recursive
+      - run: terraform validate
+      - name: Plan
+        run: terraform plan -input=false -out=tfplan -lock=false
+      - name: Apply (push to main, or manual apply)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        run: terraform apply -input=false -auto-approve tfplan
+      - name: Destroy (manual only)
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        run: terraform destroy -input=false -auto-approve
