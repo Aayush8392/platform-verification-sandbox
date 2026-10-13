@@ -52,18 +52,18 @@ jobs:
           echo "::notice title=B2-verify::key created by Terraform (from the admin key list): $(echo "$KEYS" | python3 -c 'import sys,json; d=json.load(sys.stdin); print("all key names:", [k["keyName"] for k in d.get("keys", [])], "| matched:", [(k["keyName"], k["capabilities"], k.get("bucketIds") or k.get("bucketId")) for k in d.get("keys", []) if "tfprobe" in k["keyName"]], "| code:", d.get("code"), d.get("message"))' 2>&1 | head -c 400)"
           echo "::notice title=B2-verify::key id length ${#KEY_ID}, secret length ${#KEY_SECRET} (B2 key ids are 25 chars, secrets 31)"
           set +e
-          UAUTH=$(curl -s -u "$KEY_ID:$KEY_SECRET" https://api.backblazeb2.com/b2api/v2/b2_authorize_account)
-          UAPI=$(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("apiUrl",""))' 2>/dev/null)
-          UTOKEN=$(echo "$UAUTH" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("authorizationToken",""))' 2>/dev/null)
-          echo "::notice title=B2-verify::authorize (API v2) with the Terraform-created key: $(echo "$UAUTH" | python3 -c 'import sys,json; d=json.load(sys.stdin); print((str(d.get("code")) + ": " + str(d.get("message"))) if d.get("code") else ("ok, capabilities=" + str(d["allowed"]["capabilities"]) + ", restricted to bucket id set=" + str(bool(d["allowed"].get("bucketId")))))' 2>&1 | head -c 300)"
-          LIST=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$UAPI/b2api/v2/b2_list_file_names")
-          echo "::notice title=B2-verify::list with the upload-only key (expect 401): $LIST"
-          UP=$(curl -s -H "Authorization: $UTOKEN" -d "{\"bucketId\":\"$BUCKET_ID\"}" "$UAPI/b2api/v2/b2_get_upload_url")
-          URL=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("uploadUrl",""))' 2>/dev/null)
-          UTK=$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("authorizationToken",""))' 2>/dev/null)
-          SHA=$(printf 'tf probe' | sha1sum | cut -d" " -f1)
-          CODE=$(printf 'tf probe' | curl -s -o /dev/null -w "%{http_code}" -H "Authorization: $UTK" -H "X-Bz-File-Name: raw/probe.txt" -H "Content-Type: text/plain" -H "X-Bz-Content-Sha1: $SHA" --data-binary @- "$URL")
-          echo "::notice title=B2-verify::upload with the upload-only key (expect 200): $CODE"
+          echo "tf probe" > probe.txt
+          S3="--endpoint-url https://s3.eu-central-003.backblazeb2.com --region eu-central-003"
+          PUT=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api put-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt --body probe.txt 2>&1 | head -c 200)
+          echo "::notice title=B2-verify::S3 put-object with the Terraform-created upload-only key: ${PUT:-ok (no error)}"
+          LST=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api list-objects-v2 $S3 --bucket off-tfprobe-aayush-8392 2>&1 | head -c 200)
+          echo "::notice title=B2-verify::S3 list-objects with the same key (expect denied): $LST"
+          GET=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api get-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt out.txt 2>&1 | head -c 200)
+          echo "::notice title=B2-verify::S3 get-object with the same key (expect denied): $GET"
+          DEL=$(AWS_ACCESS_KEY_ID="$KEY_ID" AWS_SECRET_ACCESS_KEY="$KEY_SECRET" aws s3api delete-object $S3 --bucket off-tfprobe-aayush-8392 --key raw/probe.txt 2>&1 | head -c 200)
+          echo "::notice title=B2-verify::S3 delete-object with the same key (expect denied): ${DEL:-ALLOWED}"
+          # remove the probe object with the admin key so the bucket can be destroyed
+          AWS_ACCESS_KEY_ID="$B2_APPLICATION_KEY_ID" AWS_SECRET_ACCESS_KEY="$B2_APPLICATION_KEY" aws s3 rm $S3 s3://off-tfprobe-aayush-8392 --recursive >/dev/null 2>&1
       - name: Destroy (cleanup)
         if: always()
         run: terraform destroy -input=false -auto-approve
