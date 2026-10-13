@@ -30,5 +30,5 @@ from dbt.cli.main import dbtRunner
 res = dbtRunner().invoke(["build", "--project-dir", project, "--profiles-dir", d, "--target-path", os.path.join(d, "target"), "--log-path", os.path.join(d, "logs")])
 summary = [{"node": r.node.name, "status": str(r.status)} for r in (res.result.results if res.result else [])]
 if not res.success:
-    raise Exception("dbt build failed: " + json.dumps(summary))
+    raise Exception("dbt build failed: " + json.dumps(summary) + " | project=" + project + " exists=" + str(os.path.exists(project)) + " cwd=" + os.getcwd() + " | exception=" + str(res.exception)[:700])
 dbutils.notebook.exit(json.dumps({"success": True, "results": summary}))
